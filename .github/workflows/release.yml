@@ -1,0 +1,97 @@
+---
+name: qq
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/release.yml
+  schedule:
+    - cron: 0 23 * * *
+
+permissions: write-all
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    name: trigger
+    outputs:
+      trigger: ${{ steps.check.outputs.trigger }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: check if we need to trigger a build
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(wget -q 'https://cdn-go.cn/qq-web/im.qq.com_new/latest/rainbow/linuxQQDownload.js' -O - | grep -oP '"version":"\K[^"]*')
+          DATE=$(wget -q 'https://cdn-go.cn/qq-web/im.qq.com_new/latest/rainbow/linuxQQDownload.js' -O - | grep -oP '"updateDate":"\K[^"]*')
+          CURRENT="${VERSION}-${DATE}"
+          if ! gh api "/repos/${{github.repository}}/releases/tags/$CURRENT" > /dev/null 2>&1; then
+          echo "trigger=true" >> "$GITHUB_OUTPUT"
+          echo "Build version=$CURRENT"
+          else
+          echo "trigger=false" >> "$GITHUB_OUTPUT"
+          echo "Skip version=$CURRENT"
+          fi
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          rm -rf manifest
+
+  build:
+    needs: trigger
+    if: needs.trigger.outputs.trigger == 'true'
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+      - name: download
+        run: |
+          wget -q 'https://cdn-go.cn/qq-web/im.qq.com_new/latest/rainbow/linuxQQDownload.js' -O - | grep -o 'https\?://[^"]*' > urls.txt
+          wget --no-verbose -i urls.txt
+          rm -rf urls.txt
+          ls -lh
+
+      - name: rename
+        run: |
+          for file in QQ*; do
+          name="${file//x86_64/amd64}"
+          architecture=$(echo "$name" | sed -E 's/QQ_[^_]+_[^_]+_([^_]+)_.*/\1/')
+          ext=${file##*.}
+          new_file="QQ-${{ needs.trigger.outputs.version }}-${architecture}.${ext}"
+          mv "$file" "$new_file"
+          done
+          ls -lh
+
+      - name: create tarball
+        run: |
+          chmod +x ./QQ-${{ needs.trigger.outputs.version }}-amd64.AppImage
+          ./QQ-${{ needs.trigger.outputs.version }}-amd64.AppImage --appimage-extract
+          mv squashfs-root qq
+          tar -cJvf QQ-${{ needs.trigger.outputs.version }}-amd64.tar.xz qq
+          sha1sum QQ-* > SHA1SUMS
+
+      - name: create release note
+        run: |
+          echo '## SHA1 Checksums' > note.md
+          echo '```' >> note.md  # Do not use double quotes
+          cat SHA1SUMS >> note.md
+          echo '```' >> note.md
+          cat note.md
+
+      - name: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.trigger.outputs.version }}
+        run: |
+          gh release create "${VERSION}" --notes-file note.md --title "QQ Linux ${VERSION}" --repo "${{github.repository}}" || true
+          gh release upload "${VERSION}" ./QQ* --repo "${{github.repository}}"
+          gh release upload "${VERSION}" ./SHA1SUMS --repo "${{github.repository}}"
+
+  keepalive-job:
+    name: Keepalive Workflow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+      - uses: gautamkrishnar/keepalive-workflow@v2
