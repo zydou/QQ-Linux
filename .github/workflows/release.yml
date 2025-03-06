@@ -26,9 +26,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION=$(wget -q 'https://cdn-go.cn/qq-web/im.qq.com_new/latest/rainbow/linuxQQDownload.js' -O - | grep -oP '"version":"\K[^"]*')
-          DATE=$(wget -q 'https://cdn-go.cn/qq-web/im.qq.com_new/latest/rainbow/linuxQQDownload.js' -O - | grep -oP '"updateDate":"\K[^"]*')
-          CURRENT="${VERSION}-${DATE}"
+          VERSION=$(wget -q https://github.com/flathub/com.qq.QQ/raw/refs/heads/master/com.qq.QQ.metainfo.xml -O - | grep -oP 'release version="\K[^"]*' | head -n 1)
+          CURRENT="${VERSION//_/-}"
           if ! gh api "/repos/${{github.repository}}/releases/tags/$CURRENT" > /dev/null 2>&1; then
           echo "trigger=true" >> "$GITHUB_OUTPUT"
           echo "Build version=$CURRENT"
@@ -37,7 +36,6 @@ jobs:
           echo "Skip version=$CURRENT"
           fi
           echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
-          rm -rf manifest
 
   build:
     needs: trigger
@@ -47,8 +45,18 @@ jobs:
     steps:
       - uses: actions/checkout@main
       - name: download
+        env:
+          VERSION: ${{ needs.trigger.outputs.version }}
         run: |
-          wget -q 'https://cdn-go.cn/qq-web/im.qq.com_new/latest/rainbow/linuxQQDownload.js' -O - | grep -o 'https\?://[^"]*' > urls.txt
+          echo "https://dldir1.qq.com/qqfile/qq/QQNT/Linux/QQ_${VERSION//-/_}_amd64_01.deb" > urls.txt
+          echo "https://dldir1.qq.com/qqfile/qq/QQNT/Linux/QQ_${VERSION//-/_}_x86_64_01.rpm" >> urls.txt
+          echo "https://dldir1.qq.com/qqfile/qq/QQNT/Linux/QQ_${VERSION//-/_}_x86_64_01.AppImage" >> urls.txt
+          echo "https://dldir1.qq.com/qqfile/qq/QQNT/Linux/QQ_${VERSION//-/_}_arm64_01.deb" >> urls.txt
+          echo "https://dldir1.qq.com/qqfile/qq/QQNT/Linux/QQ_${VERSION//-/_}_aarch64_01.rpm" >> urls.txt
+          echo "https://dldir1.qq.com/qqfile/qq/QQNT/Linux/QQ_${VERSION//-/_}_arm64_01.AppImage" >> urls.txt
+          echo "https://dldir1.qq.com/qqfile/qq/QQNT/Linux/QQ_${VERSION//-/_}_loongarch64_01.deb" >> urls.txt
+          echo "https://dldir1.qq.com/qqfile/qq/QQNT/Linux/QQ_${VERSION//-/_}_mips64el_01.deb" >> urls.txt
+          cat urls.txt
           wget --no-verbose -i urls.txt
           rm -rf urls.txt
           ls -lh
@@ -57,6 +65,7 @@ jobs:
         run: |
           for file in QQ*; do
           name="${file//x86_64/amd64}"
+          name="${name//aarch64/arm64}"
           architecture=$(echo "$name" | sed -E 's/QQ_[^_]+_[^_]+_([^_]+)_.*/\1/')
           ext=${file##*.}
           new_file="QQ-${{ needs.trigger.outputs.version }}-${architecture}.${ext}"
